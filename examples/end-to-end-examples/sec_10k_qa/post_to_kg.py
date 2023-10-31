@@ -36,11 +36,12 @@ LOCAL_NAME = "downloads"
 LOCAL_PATH = "/tmp/"
 LOCAL_FILE = "post_jtbd.csv"
 DATA_PATH = "gs://mosaicml_test/u__bojan/kg/post_jtbd.csv"
+DESTINATION_PATH = "gs://mosaicml_test/u__bojan/kg/"
 NUM_PARALLEL_FILES = 4
 NUM_THREADS_PER_FILE = 10
 MB = 1024 * 1024
 
-LIMIT = 10
+LIMIT = 100
 
 openai.api_key = os.environ["OPENAI_API_KEY"]
 
@@ -263,6 +264,19 @@ def download_model(download_parameters: CheckpointPath):
                     )
                 except botocore.exceptions.ClientError as e:
                     print(f"Error downloading file with key: {file_key} with error: {e}")
+        
+        def upload_file(file_name: str) -> None:
+            with tqdm(total=task.size, unit="B", unit_scale=True, desc=file_name) as pbar:
+                  try:
+                      s3.upload_file(
+                          Bucket=parsed_path.netloc,
+                          Key=task.file_key,
+                          Filename=os.path.join(local_path, file_name),
+                          Callback=lambda x: pbar.update(x),
+                          Config=config,
+                      )
+                  except botocore.exceptions.ClientError as e:
+                      print(f"Error downloading file with key: {file_key} with error: {e}")
 
         with ThreadPool(NUM_PARALLEL_FILES) as pool:
             pool.map(download_file, tasks)
@@ -333,5 +347,19 @@ g = index.get_networkx_graph()
 net = Network(notebook=True, cdn_resources="in_line", directed=True)
 net.from_nx(g)
 
-GRAPH_PATH = os.path.join(LOCAL_PATH, LOCAL_NAME, f"non_filtered_graph_{LIMIT}.html")
+file_name = f"non_filtered_graph_{LIMIT}.html"
+GRAPH_PATH = os.path.join(LOCAL_PATH, LOCAL_NAME, file_name) 
 net.save_graph(GRAPH_PATH)
+
+config = botocore.client.Config(max_pool_connections=NUM_PARALLEL_FILES * NUM_THREADS_PER_FILE)
+s3 = boto3.client("s3",
+    region_name="auto",
+    endpoint_url="https://storage.googleapis.com",
+    aws_access_key_id=os.environ["GCS_KEY"],
+    aws_secret_access_key=os.environ["GCS_SECRET"],
+    config=config
+)
+
+s3.upload_file(Filename=GRAPH_PATH, Bucket='mosaicml_test',
+               Key=f'u__bojan/kg/{file_name}')
+
