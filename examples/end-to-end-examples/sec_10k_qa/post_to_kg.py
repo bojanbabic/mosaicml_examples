@@ -362,6 +362,10 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(
         description='Process and generate KG from the posts')
     parser.add_argument(
+        '--folder_for_upload',
+        type=str,
+        help='Object store prefix to upload the processed data to')
+    parser.add_argument(
         '--limit',
         type=int,
         default=1000,
