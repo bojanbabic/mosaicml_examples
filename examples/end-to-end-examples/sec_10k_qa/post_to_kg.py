@@ -212,7 +212,7 @@ def download_model(download_parameters: CheckpointPath):
             logger.info(f"[+] Path {local_path} already exists, checking for missing files")
         else:
             Path(local_path).mkdir(parents=True, exist_ok=True)
-            logger.info(f"Downloading model from path: {model_name_or_path}")
+            logger.info(f"Downloading data from path: {model_name_or_path}")
 
         parsed_path = urlparse(model_name_or_path)
 
@@ -368,5 +368,7 @@ def generate_and_store_graph(documents, use_wiki=False):
 
     s3.upload_file(Filename=GRAPH_PATH, Bucket='mosaicml_test', Key=f'u__bojan/kg/{file_name}')
                     
+logger.info("Generating graph w/o wiki filtering")
 generate_and_store_graph(documents)
+logger.info("Generating graph with wiki filtering")
 generate_and_store_graph(documents, use_wiki=True)
