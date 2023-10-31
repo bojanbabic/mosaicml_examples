@@ -50,7 +50,7 @@ triplet_extractor = pipeline(
     model="Babelscape/rebel-large",
     tokenizer="Babelscape/rebel-large",
     # comment this line to run on CPU
-    # device="cuda:0",
+    device="cuda:0",
 )
 
 class DownloadTask:
