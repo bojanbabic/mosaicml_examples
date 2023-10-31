@@ -1,0 +1,8 @@
+llama_index
+transformers
+wikipedia
+html2text
+pyvis
+openai
+pydantic==1.10.8
+boto3
