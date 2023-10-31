@@ -1,15 +1,13 @@
+import argparse
 from multiprocessing.pool import ThreadPool
-from typing import Optional, Dict, List
 import logging
 from urllib.parse import urlparse
-from pathlib import Path
 import os
 import openai
-
 import re
+from pathlib import Path
+from typing import Optional, List
 from tqdm import tqdm
-import logging
-import sys
 import wikipedia
 import pandas as pd
 
@@ -21,7 +19,7 @@ from llama_index import (
     ServiceContext,
     KnowledgeGraphIndex,
 )
-from llama_index import SimpleWebPageReader
+from llama_index import Document
 from llama_index.graph_stores import SimpleGraphStore
 from llama_index.storage.storage_context import StorageContext
 from llama_index.llms import OpenAI
@@ -50,8 +48,9 @@ triplet_extractor = pipeline(
     model="Babelscape/rebel-large",
     tokenizer="Babelscape/rebel-large",
     # comment this line to run on CPU
-    device="cuda:0",
+    #device="cuda:0",
 )
+
 
 class DownloadTask:
     file_key: str
@@ -61,14 +60,14 @@ class DownloadTask:
         self.file_key = file_key
         self.size = size
 
+
 class CloudPath:
     s3_path: Optional[str]
     hf_path: Optional[str]
     gcp_path: Optional[str]
 
 
-
-class CheckpointPath(CloudPath):
+class DataPath(CloudPath):
     """
     Typed dictionary for default download parameters that are
     compatible with our out-of-the-box downloader
@@ -85,7 +84,7 @@ class CheckpointPath(CloudPath):
 
     def get_path(self) -> str:
         if not self.hf_path:
-            return os.path.join(LOCAL_PATH, LOCAL_MODEL_NAME)
+            return os.path.join(LOCAL_PATH, LOCAL_NAME)
         return self.s3_path or self.hf_path or self.gcp_path
 
 def extract_triplets(input_text):
@@ -159,7 +158,6 @@ class WikiFilter:
             return None
 
 
-
 def extract_triplets_wiki(text):
     relations = extract_triplets(text)
 
@@ -183,7 +181,8 @@ def extract_triplets_wiki(text):
 
     return filtered_relations
 
-def download_model(download_parameters: CheckpointPath):
+
+def download_model(download_parameters: DataPath):
     """
     This function runs at server startup and handles downloading all relevant model files
     """
@@ -195,9 +194,10 @@ def download_model(download_parameters: CheckpointPath):
             # s3 creds need to already be present as env vars
             # s3 = boto3.client('s3', config=config)
             # todo
-            s3 = boto3.client('s3',
-                      aws_access_key_id=AWS_ACCESS_KEY_ID,
-                      aws_secret_access_key=AWS_SECRET_ACCESS_KEY)
+            # s3 = boto3.client('s3',
+            #                    aws_access_key_id=AWS_ACCESS_KEY_ID,
+            #                    aws_secret_access_key=AWS_SECRET_ACCESS_KEY
+            #                   )
         else:
             s3 = boto3.client("s3",
                               region_name="auto",
@@ -265,31 +265,11 @@ def download_model(download_parameters: CheckpointPath):
                 except botocore.exceptions.ClientError as e:
                     print(f"Error downloading file with key: {file_key} with error: {e}")
         
-        def upload_file(file_name: str) -> None:
-            with tqdm(total=task.size, unit="B", unit_scale=True, desc=file_name) as pbar:
-                  try:
-                      s3.upload_file(
-                          Bucket=parsed_path.netloc,
-                          Key=task.file_key,
-                          Filename=os.path.join(local_path, file_name),
-                          Callback=lambda x: pbar.update(x),
-                          Config=config,
-                      )
-                  except botocore.exceptions.ClientError as e:
-                      print(f"Error downloading file with key: {file_key} with error: {e}")
-
         with ThreadPool(NUM_PARALLEL_FILES) as pool:
             pool.map(download_file, tasks)
 
-    elif download_parameters.hf_path:
-        model_name_or_path = download_parameters.hf_path
-        logger.info(f"Downloading HF model with name: {model_name_or_path}")
-        snapshot_download(repo_id=model_name_or_path)
-    else:
-        raise Exception("No valid download path provided. Please provide either an s3_path, gcp_path, or hf_path")
 
-
-def parse_checkpoint_path(path: str):
+def parse_data_path(path: str):
     # Regular expression for S3 path: s3://bucket_name/object_key
     s3_regex = re.compile(r'^s3://(?P<bucket>[a-zA-Z0-9._-]+)/(?P<key>.+)$')
     
@@ -309,29 +289,9 @@ def parse_checkpoint_path(path: str):
     # If the path is neither S3 nor GCS, raise an error
     raise ValueError("Invalid checkpoint path, please double check. Supported paths are S3 (s3://bucket/key) and GCS (gs://bucket/key)")
 
-model_checkpoint_path = parse_checkpoint_path(DATA_PATH)
-download_parameters = CheckpointPath(**model_checkpoint_path)
-download_model(download_parameters)
 
-wiki_filter = WikiFilter()
-
-local_path = os.path.join(LOCAL_PATH, LOCAL_NAME, LOCAL_FILE)
-df = pd.read_csv(local_path)
-df = df.head(LIMIT)
-
-from llama_index import Document
-
-# merge all documents into one, since it's split by page
-documents = [Document(text="".join([x.text for x in df.itertuples() if x.text]))]
-
-llm = OpenAI(temperature=0.1, model="gpt-3.5-turbo")
-service_context = ServiceContext.from_defaults(llm=llm, chunk_size=256)
-
-# set up graph storage context
-graph_store = SimpleGraphStore()
-storage_context = StorageContext.from_defaults(graph_store=graph_store)
-
-def generate_and_store_graph(documents, use_wiki=False):
+def generate_and_store_graph(documents, storage_context, service_context,
+                             limit, use_wiki=False):
 
     triplet_fn = extract_triplets if not use_wiki else extract_triplets_wiki
 
@@ -353,22 +313,59 @@ def generate_and_store_graph(documents, use_wiki=False):
 
     file_prefix = "" if not use_wiki else "wiki_"
 
-    file_name = f"{file_prefix}non_filtered_graph_{LIMIT}.html"
+    file_name = f"{file_prefix}non_filtered_graph_{limit}.html"
     GRAPH_PATH = os.path.join(LOCAL_PATH, LOCAL_NAME, file_name) 
     net.save_graph(GRAPH_PATH)
 
     config = botocore.client.Config(max_pool_connections=NUM_PARALLEL_FILES * NUM_THREADS_PER_FILE)
     s3 = boto3.client("s3",
-        region_name="auto",
-        endpoint_url="https://storage.googleapis.com",
-        aws_access_key_id=os.environ["GCS_KEY"],
-        aws_secret_access_key=os.environ["GCS_SECRET"],
-        config=config
+                      region_name="auto",
+                      endpoint_url="https://storage.googleapis.com",
+                      aws_access_key_id=os.environ["GCS_KEY"],
+                      aws_secret_access_key=os.environ["GCS_SECRET"],
+                      config=config
     )
 
     s3.upload_file(Filename=GRAPH_PATH, Bucket='mosaicml_test', Key=f'u__bojan/kg/{file_name}')
                     
-logger.info("Generating graph w/o wiki filtering")
-generate_and_store_graph(documents)
-logger.info("Generating graph with wiki filtering")
-generate_and_store_graph(documents, use_wiki=True)
+
+def main(limit: int) -> None:
+    data_path = parse_data_path(DATA_PATH)
+    download_parameters = DataPath(**data_path)
+    download_model(download_parameters)
+
+    local_path = os.path.join(LOCAL_PATH, LOCAL_NAME, LOCAL_FILE)
+    df = pd.read_csv(local_path)
+    df = df.head(limit)
+
+    # merge all documents into one, since it's split by page
+    documents = [Document(text="".join([x.text for x in df.itertuples() if x.text]))]
+
+    llm = OpenAI(temperature=0.1, model="gpt-3.5-turbo")
+    service_context = ServiceContext.from_defaults(llm=llm, chunk_size=256)
+
+    # set up graph storage context
+    graph_store = SimpleGraphStore()
+    storage_context = StorageContext.from_defaults(graph_store=graph_store)
+
+    logger.info("Generating graph w/o wiki filtering")
+    generate_and_store_graph(documents, service_context=service_context,
+                             storage_context=storage_context, limit=limit)
+    logger.info("Generating graph with wiki filtering")
+    generate_and_store_graph(documents, service_context=service_context,
+                             storage_context=storage_context, limit=limit, use_wiki=True)
+
+
+wiki_filter = WikiFilter()
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(
+        description='Process and generate KG from the posts')
+    parser.add_argument(
+        '--limit',
+        type=int,
+        default=1000,
+        help='Number of rows to include in the graph.')
+    args = parser.parse_args()
+
+    main(args.limit)
