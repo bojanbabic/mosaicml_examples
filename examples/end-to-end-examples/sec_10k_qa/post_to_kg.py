@@ -41,7 +41,7 @@ NUM_PARALLEL_FILES = 4
 NUM_THREADS_PER_FILE = 10
 MB = 1024 * 1024
 
-LIMIT = 100
+LIMIT = 10000
 
 openai.api_key = os.environ["OPENAI_API_KEY"]
 
@@ -331,35 +331,42 @@ service_context = ServiceContext.from_defaults(llm=llm, chunk_size=256)
 graph_store = SimpleGraphStore()
 storage_context = StorageContext.from_defaults(graph_store=graph_store)
 
-index = KnowledgeGraphIndex.from_documents(
-    documents,
-    max_triplets_per_chunk=3,
-    kg_triplet_extract_fn=extract_triplets,
-    storage_context=storage_context,
-    service_context=service_context,
-    include_embeddings=True,
-)
+def generate_and_store_graph(documents, use_wiki=False):
 
-## create graph
-from pyvis.network import Network
+    triplet_fn = extract_triplets if not use_wiki else extract_triplets_wiki
 
-g = index.get_networkx_graph()
-net = Network(notebook=True, cdn_resources="in_line", directed=True)
-net.from_nx(g)
+    index = KnowledgeGraphIndex.from_documents(
+        documents,
+        max_triplets_per_chunk=3,
+        kg_triplet_extract_fn=triplet_fn,
+        storage_context=storage_context,
+        service_context=service_context,
+        include_embeddings=True,
+    )
 
-file_name = f"non_filtered_graph_{LIMIT}.html"
-GRAPH_PATH = os.path.join(LOCAL_PATH, LOCAL_NAME, file_name) 
-net.save_graph(GRAPH_PATH)
+    ## create graph
+    from pyvis.network import Network
 
-config = botocore.client.Config(max_pool_connections=NUM_PARALLEL_FILES * NUM_THREADS_PER_FILE)
-s3 = boto3.client("s3",
-    region_name="auto",
-    endpoint_url="https://storage.googleapis.com",
-    aws_access_key_id=os.environ["GCS_KEY"],
-    aws_secret_access_key=os.environ["GCS_SECRET"],
-    config=config
-)
+    g = index.get_networkx_graph()
+    net = Network(notebook=True, cdn_resources="in_line", directed=True)
+    net.from_nx(g)
 
-s3.upload_file(Filename=GRAPH_PATH, Bucket='mosaicml_test',
-               Key=f'u__bojan/kg/{file_name}')
+    file_prefix = "" if not use_wiki else "wiki_"
 
+    file_name = f"{file_prefix}non_filtered_graph_{LIMIT}.html"
+    GRAPH_PATH = os.path.join(LOCAL_PATH, LOCAL_NAME, file_name) 
+    net.save_graph(GRAPH_PATH)
+
+    config = botocore.client.Config(max_pool_connections=NUM_PARALLEL_FILES * NUM_THREADS_PER_FILE)
+    s3 = boto3.client("s3",
+        region_name="auto",
+        endpoint_url="https://storage.googleapis.com",
+        aws_access_key_id=os.environ["GCS_KEY"],
+        aws_secret_access_key=os.environ["GCS_SECRET"],
+        config=config
+    )
+
+    s3.upload_file(Filename=GRAPH_PATH, Bucket='mosaicml_test', Key=f'u__bojan/kg/{file_name}')
+                    
+generate_and_store_graph(documents)
+generate_and_store_graph(documents, use_wiki=True)
