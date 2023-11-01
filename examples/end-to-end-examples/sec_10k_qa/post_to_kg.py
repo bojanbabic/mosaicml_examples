@@ -52,7 +52,7 @@ triplet_extractor = pipeline(
     model="Babelscape/rebel-large",
     tokenizer="Babelscape/rebel-large",
     # comment this line to run on CPU
-    device="cuda:0",
+    #device="cuda:0",
 )
 
 
@@ -311,7 +311,7 @@ def generate_and_store_graph(documents, storage_context, service_context,
     ## create graph
     from pyvis.network import Network
 
-    g = index.get_networkx_graph()
+    g = index.get_networkx_graph(limit=10000)
     net = Network(notebook=True, cdn_resources="in_line", directed=True)
     net.from_nx(g)
 
