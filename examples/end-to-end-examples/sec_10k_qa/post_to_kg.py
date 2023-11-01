@@ -48,7 +48,7 @@ triplet_extractor = pipeline(
     model="Babelscape/rebel-large",
     tokenizer="Babelscape/rebel-large",
     # comment this line to run on CPU
-    #device="cuda:0",
+    device="cuda:0",
 )
 
 
@@ -329,7 +329,7 @@ def generate_and_store_graph(documents, storage_context, service_context,
     s3.upload_file(Filename=GRAPH_PATH, Bucket='mosaicml_test', Key=f'u__bojan/kg/{file_name}')
                     
 
-def main(limit: int) -> None:
+def main(limit: int, run_on_gpu: bool) -> None:
     data_path = parse_data_path(DATA_PATH)
     download_parameters = DataPath(**data_path)
     download_model(download_parameters)
@@ -366,10 +366,14 @@ if __name__ == '__main__':
         type=str,
         help='Object store prefix to upload the processed data to')
     parser.add_argument(
+        '--run_on_gpu',
+        type=bool,
+        help='If this code should run on GPU')
+    parser.add_argument(
         '--limit',
         type=int,
         default=1000,
         help='Number of rows to include in the graph.')
     args = parser.parse_args()
 
-    main(args.limit)
+    main(args.limit, args.run_on_gpu)
