@@ -295,13 +295,13 @@ def parse_data_path(path: str):
 
 
 def generate_and_store_graph(documents, storage_context, service_context,
-                             limit, use_wiki=False):
+                             limit, max_triplets, use_wiki=False):
 
     triplet_fn = extract_triplets if not use_wiki else extract_triplets_wiki
 
     index = KnowledgeGraphIndex.from_documents(
         documents,
-        max_triplets_per_chunk=3,
+        max_triplets_per_chunk=max_triplets,
         kg_triplet_extract_fn=triplet_fn,
         storage_context=storage_context,
         service_context=service_context,
@@ -333,7 +333,7 @@ def generate_and_store_graph(documents, storage_context, service_context,
     s3.upload_file(Filename=GRAPH_PATH, Bucket='mosaicml_test', Key=f'u__bojan/kg/{file_name}')
                     
 
-def main(limit: int, run_on_gpu: bool) -> None:
+def main(limit: int, run_on_gpu: bool, max_triplets: int) -> None:
     data_path = parse_data_path(DATA_PATH)
     download_parameters = DataPath(**data_path)
     download_model(download_parameters)
@@ -354,10 +354,12 @@ def main(limit: int, run_on_gpu: bool) -> None:
 
     logger.info("Generating graph w/o wiki filtering")
     generate_and_store_graph(documents, service_context=service_context,
-                             storage_context=storage_context, limit=limit)
+                             storage_context=storage_context, limit=limit,
+                             max_triplets=max_triplets)
     logger.info("Generating graph with wiki filtering")
     generate_and_store_graph(documents, service_context=service_context,
-                             storage_context=storage_context, limit=limit, use_wiki=True)
+                             storage_context=storage_context, limit=limit,
+                             max_triplets=max_triplets, use_wiki=True)
 
 
 wiki_filter = WikiFilter()
@@ -378,6 +380,11 @@ if __name__ == '__main__':
         type=int,
         default=1000,
         help='Number of rows to include in the graph.')
+    parser.add_argument(
+        '--max_triplets',
+        type=int,
+        default=10,
+        help='Max triplets per document to extract.')
     args = parser.parse_args()
 
-    main(args.limit, args.run_on_gpu)
+    main(args.limit, args.run_on_gpu, args.max_triplets)
